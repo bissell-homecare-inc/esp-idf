@@ -29,6 +29,7 @@
 #include "esp_efuse.h"
 #include "esp_attr.h"
 
+
 #if CONFIG_IDF_TARGET_ESP32
 #include "esp32/rom/secure_boot.h"
 #elif CONFIG_IDF_TARGET_ESP32S2
@@ -112,6 +113,7 @@ static esp_err_t image_validate(const esp_partition_t *partition, esp_image_load
     return ESP_OK;
 }
 
+#ifndef CONFIG_MOS_OTA_COMPATIBILITY
 static esp_ota_img_states_t set_new_state_otadata(void)
 {
 #ifdef CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
@@ -121,6 +123,7 @@ static esp_ota_img_states_t set_new_state_otadata(void)
     return ESP_OTA_IMG_UNDEFINED;
 #endif
 }
+#endif
 
 esp_err_t esp_ota_begin(const esp_partition_t *partition, size_t image_size, esp_ota_handle_t *out_handle)
 {
@@ -429,13 +432,22 @@ static esp_err_t esp_rewrite_ota_data(esp_partition_subtype_t subtype)
         while (seq > (SUB_TYPE_ID(subtype) + 1) % ota_app_count + i * ota_app_count) {
             i++;
         }
+#ifdef CONFIG_MOS_OTA_COMPATIBILITY
+        int next_otadata = 0; // if 0 -> will be next 1. and if 1 -> will be next 0.
+        otadata[next_otadata].ota_state = subtype;
+#else
         int next_otadata = (~active_otadata)&1; // if 0 -> will be next 1. and if 1 -> will be next 0.
         otadata[next_otadata].ota_state = set_new_state_otadata();
+#endif
         return rewrite_ota_seq(otadata, (SUB_TYPE_ID(subtype) + 1) % ota_app_count + i * ota_app_count, next_otadata, otadata_partition);
     } else {
         /* Both OTA slots are invalid, probably because unformatted... */
         int next_otadata = 0;
+#ifdef CONFIG_MOS_OTA_COMPATIBILITY
+        otadata[next_otadata].ota_state = subtype;
+#else
         otadata[next_otadata].ota_state = set_new_state_otadata();
+#endif
         return rewrite_ota_seq(otadata, SUB_TYPE_ID(subtype) + 1, next_otadata, otadata_partition);
     }
 }
@@ -729,6 +741,29 @@ static esp_err_t esp_ota_current_ota_is_workable(bool valid)
 
     int active_otadata = bootloader_common_get_active_otadata(otadata);
     if (active_otadata != -1 && esp_ota_get_app_partition_count() != 0) {
+
+#ifdef CONFIG_MOS_OTA_COMPATIBILITY
+        if (valid == true) {
+            esp_err_t err = rewrite_ota_seq(otadata, otadata[active_otadata].ota_seq, active_otadata, otadata_partition);
+#ifdef CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK
+            if (err == ESP_OK) {
+                return esp_ota_set_anti_rollback();
+            }
+#endif
+            return err;
+        } else  {
+            if (esp_ota_check_rollback_is_possible() == false) {
+                ESP_LOGE(TAG, "Rollback is not possible, do not have any suitable apps in slots");
+                return ESP_ERR_OTA_ROLLBACK_FAILED;
+            }
+            esp_err_t err = rewrite_ota_seq(otadata, otadata[active_otadata].ota_seq, active_otadata, otadata_partition);
+            if (err != ESP_OK) {
+                return err;
+            }
+            ESP_LOGI(TAG, "Rollback to previously worked partition. Restart.");
+            esp_restart();
+        }
+#else
         if (valid == true && otadata[active_otadata].ota_state != ESP_OTA_IMG_VALID) {
             otadata[active_otadata].ota_state = ESP_OTA_IMG_VALID;
             ESP_LOGD(TAG, "OTA[current] partition is marked as VALID");
@@ -753,10 +788,13 @@ static esp_err_t esp_ota_current_ota_is_workable(bool valid)
             ESP_LOGI(TAG, "Rollback to previously worked partition. Restart.");
             esp_restart();
         }
+#endif
+
     } else {
         ESP_LOGE(TAG, "Running firmware is factory");
         return ESP_FAIL;
     }
+
     return ESP_OK;
 }
 
@@ -771,15 +809,19 @@ esp_err_t esp_ota_mark_app_invalid_rollback_and_reboot(void)
 }
 
 static bool check_invalid_otadata (const esp_ota_select_entry_t *s) {
+#ifdef CONFIG_MOS_OTA_COMPATIBILITY
+    return s->ota_seq != UINT32_MAX &&
+            s->crc == bootloader_common_ota_select_crc(s);
+#else
     return s->ota_seq != UINT32_MAX &&
            s->crc == bootloader_common_ota_select_crc(s) &&
            (s->ota_state == ESP_OTA_IMG_INVALID ||
             s->ota_state == ESP_OTA_IMG_ABORTED);
+#endif
 }
 
 static int get_last_invalid_otadata(const esp_ota_select_entry_t *two_otadata)
 {
-
     bool invalid_otadata[2];
     invalid_otadata[0] = check_invalid_otadata(&two_otadata[0]);
     invalid_otadata[1] = check_invalid_otadata(&two_otadata[1]);

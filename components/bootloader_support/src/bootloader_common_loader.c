@@ -33,7 +33,14 @@ static const char* TAG = "boot_comm";
 
 uint32_t bootloader_common_ota_select_crc(const esp_ota_select_entry_t *s)
 {
+#ifdef CONFIG_MOS_OTA_COMPATIBILITY
+    esp_ota_select_entry_t tmp;
+    memcpy(&tmp, s, sizeof(tmp));
+    tmp.crc = 0;
+    return esp_rom_crc32_le(UINT32_MAX, (uint8_t*)&tmp.ota_seq, sizeof(tmp));
+#else
     return esp_rom_crc32_le(UINT32_MAX, (uint8_t*)&s->ota_seq, 4);
+#endif
 }
 
 bool bootloader_common_ota_select_invalid(const esp_ota_select_entry_t *s)

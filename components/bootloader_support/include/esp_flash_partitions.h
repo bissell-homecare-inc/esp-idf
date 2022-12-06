@@ -57,12 +57,21 @@ typedef enum {
 
 /* OTA selection structure (two copies in the OTA data partition.)
    Size of 32 bytes is friendly to flash encryption */
+#ifdef CONFIG_MOS_OTA_COMPATIBILITY
+typedef struct {
+    uint32_t ota_seq;
+    uint32_t ota_state;
+    uint8_t  seq_label[20];
+    uint32_t crc; /* CRC32 of ota_seq field only */
+} esp_ota_select_entry_t;
+#else
 typedef struct {
     uint32_t ota_seq;
     uint8_t  seq_label[20];
     uint32_t ota_state;
     uint32_t crc; /* CRC32 of ota_seq field only */
 } esp_ota_select_entry_t;
+#endif
 
 
 typedef struct {

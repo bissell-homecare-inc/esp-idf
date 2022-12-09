@@ -13,8 +13,8 @@ if(NOT ${target} STREQUAL "linux")
 endif()
 
 idf_component_register(SRCS ${srcs}
-                       INCLUDE_DIRS "include" "spiffs/src"
-                       PRIV_INCLUDE_DIRS "." 
+                       INCLUDE_DIRS "include"
+                       PRIV_INCLUDE_DIRS "." "spiffs/src"
                        REQUIRES esp_partition
                        PRIV_REQUIRES ${pr} spi_flash)
 
